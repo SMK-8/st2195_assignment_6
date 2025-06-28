@@ -1,0 +1,101 @@
+---
+title: "ECB Speech and FX Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidytext)
+library(lubridate)
+library(zoo)
+library(readr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load and merge datasets 
+
+```{r}
+
+fx <- read_csv("~/Desktop/st_2195/st2195_assignment_6_data/fx.csv", show_col_types = FALSE)
+glimpse(fx)
+
+speeches <- read_delim("~/Desktop/st_2195/st2195_assignment_6_data/speeches.csv", delim = "|", show_col_types = FALSE)
+glimpse(speeches)
+
+# Standardize date format
+fx <- fx %>%
+  rename(date = DATE,
+         exchange_rate = 'US dollar/Euro (EXR.D.USD.EUR.SP00.A)') %>%
+  mutate(date = as.Date(date))
+speeches <- speeches %>% mutate(date = as.Date(date))
+
+# Keep only entries with exchange rate measurement
+df <- speeches %>% left_join(fx, by = "date")
+
+# Show result
+glimpse(df)
+
+```
+
+# Remove outliers or missing values
+
+```{r}
+# Remove entries with negative or very high/low exchange rates
+df <- df %>% filter(exchange_rate > 0 & exchange_rate < 100)
+
+df <- df %>%
+  arrange(date) %>%
+  mutate(exchange_rate = na.locf(exchange_rate, na.rm = FALSE)) %>%
+  drop_na(exchange_rate)
+
+# Show result
+sum(is.na(df$exchange_rate))
+summary(df)
+
+```
+
+
+# Calculate exchange rate return and create flags
+```{r}
+df <- df %>%
+  arrange(date) %>%
+  mutate(return = 100 * (exchange_rate / lag(exchange_rate) - 1),
+         good_news = if_else(return > 0.5, 1, 0),
+         bad_news = if_else(return < -0.5, 1, 0))
+
+# Show summary of returns and flags
+print(table(df$good_news))
+print(table(df$bad_news))
+```
+
+# Get 20 words with top frequency for good and bad indicators
+
+```{r}
+# Remove entries with NA contents
+df <- df %>% drop_na(contents)
+
+# Tokenize and remove stop words
+data("stop_words")
+
+get_top_words <- function(df_subset) {
+  df_subset %>%
+    unnest_tokens(word, contents) %>%
+    anti_join(stop_words, by = "word") %>%
+    count(word, sort = TRUE) %>%
+    slice_head(n = 20)
+}
+
+good_indicators <- get_top_words(df %>% filter(good_news == 1))
+bad_indicators <- get_top_words(df %>% filter(bad_news == 1))
+
+# Show top words
+good_indicators
+bad_indicators
+
+# Save outputs
+write_csv(good_indicators, "~/Desktop/st_2195/st2195_assignment_6/good_indicators.csv")
+write_csv(bad_indicators, "~/Desktop/st_2195/st2195_assignment_6/bad_indicators.csv")
+```
+
+
